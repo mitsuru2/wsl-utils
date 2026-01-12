@@ -82,7 +82,28 @@ echo ""
 echo "[INF] Cleaning up unnecessary packages..."
 apt autoremove -y
 
+# カレントユーザーをdockerグループに追加
+echo ""
+echo "[INF] Adding current user to 'docker' group..."
+groupadd docker 2>/dev/null
+CURRENT_USER=${SUDO_USER:-$(whoami)}        # SUDO_USERが設定されていない場合はwhoamiで取得
+echo "[INF] Current user: $CURRENT_USER"
+usermod -aG docker "$CURRENT_USER"
+
+# グループ追加を確認
+echo "[INF] Verifying docker group membership..."
+if id -nG "$CURRENT_USER" | grep -qw docker; then
+    echo "[INF] User '$CURRENT_USER' successfully added to docker group."
+else
+    echo "[WRN] User '$CURRENT_USER' could not be added to docker group."
+fi
+
 # 完了メッセージ
+echo ""
 echo "[INF] Docker setup script completed successfully."
-echo "[INF] You can verify the installation by running 'docker --version'."
+echo ""
+echo "[INF] #################### ATTENTION #####################"
+echo "[INF] You must restart WSL2 to apply the group changes."
+echo "[INF] Exit WSL2 terminal and restart it."
+echo "[INF] ###################################################"
 echo ""
