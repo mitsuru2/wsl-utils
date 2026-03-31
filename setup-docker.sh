@@ -1,5 +1,18 @@
 #!/bin/bash
 
+# ==============================================================================
+# Docker Setup Script for WSL2 (Ubuntu/Debian)
+#
+# このスクリプトは、WSL2上のUbuntu/Debian系システムにDocker Engineを自動インストールします。
+# 主な処理内容は以下の通りです：
+#   1. 必要な依存パッケージ（curl, ca-certificates）のインストール
+#   2. Docker公式GPGキーの追加とリポジトリの設定
+#   3. Docker Engine, CLI, Compose等のインストール
+#   4. 現在のユーザーをdockerグループに追加（sudoなしで実行可能にするため）
+#
+# 使用方法: sudo ./setup-docker.sh
+# ==============================================================================
+
 # ヘルプ表示
 usage() {
     echo "Usage: $0"
@@ -74,8 +87,7 @@ apt update
 # Docker Engine、CLI、Containerdのインストール
 echo ""
 echo "[INF] Installing Docker Engine, CLI, and Containerd..."
-VERSION_STRING=5:29.1.3-1~ubuntu.24.04~noble
-apt install -y docker-ce=$VERSION_STRING docker-ce-cli=$VERSION_STRING containerd.io docker-buildx-plugin docker-compose-plugin
+apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
 # 不要なパッケージの削除
 echo ""
