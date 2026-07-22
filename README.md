@@ -18,7 +18,7 @@ sudo ./setup-docker.sh
 スクリプト実行後、グループ設定を反映させるために必ずWSL2を再起動（PowerShell等から `wsl --shutdown` を実行）してください。
 
 ### 2. setup-other-tools.sh
-WSL2上のUbuntu/Debian系システムに `git` と VS Code (Linux版) をインストールし、`/etc/wsl.conf` に `appendWindowsPath = false` を設定します。
+WSL2上のUbuntu/Debian系システムに `git` と VS Code (Linux版) をインストールし、VS Codeに Remote Development 拡張パック (`ms-vscode-remote.vscode-remote-extensionpack`) を導入したうえで、`/etc/wsl.conf` に `appendWindowsPath = false` を設定します。
 
 #### 使い方
 

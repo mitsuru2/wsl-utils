@@ -8,7 +8,8 @@
 # 主な処理内容は以下の通りです：
 #   1. git のインストール
 #   2. VS Code (Linux版) のインストール
-#   3. /etc/wsl.conf に appendWindowsPath = false を設定
+#   3. VS Code Remote Development 拡張パックのインストール
+#   4. /etc/wsl.conf に appendWindowsPath = false を設定
 #
 # 使用方法: sudo ./setup-other-tools.sh
 # ==============================================================================
@@ -29,6 +30,19 @@ check_installed() {
         return 0
     else
         echo "Package '$name' is not installed."
+        return 1
+    fi
+}
+
+# VS Code拡張機能のインストール確認（実行ユーザー権限で確認）
+check_extension_installed() {
+    local extension_id=$1
+    local user=$2
+    if sudo -H -u "$user" code --list-extensions 2>/dev/null | grep -qiw "$extension_id"; then
+        echo "Extension '$extension_id' is already installed."
+        return 0
+    else
+        echo "Extension '$extension_id' is not installed."
         return 1
     fi
 }
@@ -106,6 +120,16 @@ fi
 echo ""
 echo "[INF] Cleaning up unnecessary packages..."
 apt autoremove -y
+
+# --- VS Code Remote Development 拡張パックのインストール ---
+echo ""
+echo "[INF] Installing VS Code Remote Development Extension Pack..."
+EXTENSION_ID="ms-vscode-remote.vscode-remote-extensionpack"
+CURRENT_USER=${SUDO_USER:-$(whoami)}        # SUDO_USERが設定されていない場合はwhoamiで取得
+echo "[INF] Current user: $CURRENT_USER"
+if ! check_extension_installed "$EXTENSION_ID" "$CURRENT_USER"; then
+    sudo -H -u "$CURRENT_USER" code --install-extension "$EXTENSION_ID" --force
+fi
 
 # --- /etc/wsl.conf の設定変更 ---
 echo ""
