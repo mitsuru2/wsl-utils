@@ -1,23 +1,24 @@
 #!/bin/bash
 
 # ==============================================================================
-# Other Tools Setup Script for WSL2 (Ubuntu/Debian)
+# Remote Development Setup Script for WSL2 (Ubuntu/Debian)
 #
-# このスクリプトは、WSL2上のUbuntu/Debian系システムにDocker以外の
-# 開発ツールをインストールし、WSL2の設定を変更します。
+# このスクリプトは、WSL2上のUbuntu/Debian系システムにリモート開発環境を
+# 構築するために必要なツール一式をインストール・設定します。
 # 主な処理内容は以下の通りです：
-#   1. git のインストール
-#   2. VS Code (Linux版) のインストール
-#   3. VS Code Remote Development 拡張パックのインストール
-#   4. /etc/wsl.conf に appendWindowsPath = false を設定
+#   1. Docker Engineのインストールと、現在のユーザーのdockerグループへの追加
+#   2. git のインストール
+#   3. VS Code (Linux版) のインストール
+#   4. VS Code Remote Development 拡張パックのインストール
+#   5. /etc/wsl.conf に appendWindowsPath = false を設定
 #
-# 使用方法: sudo ./setup-other-tools.sh
+# 使用方法: sudo ./setup-remote-development.sh
 # ==============================================================================
 
 # ヘルプ表示
 usage() {
     echo "Usage: $0"
-    echo "This script installs git and VS Code, and updates /etc/wsl.conf on a Debian-based system."
+    echo "This script sets up a remote development environment (Docker, git, VS Code) on a Debian-based system."
     echo "Please run it with superuser privileges."
     exit 1
 }
@@ -60,10 +61,64 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 # 開始メッセージ
-echo "[INF] Starting other tools setup script..."
+echo "[INF] Starting remote development setup script..."
+
+CURRENT_USER=${SUDO_USER:-$(whoami)}        # SUDO_USERが設定されていない場合はwhoamiで取得
+echo "[INF] Current user: $CURRENT_USER"
 
 # パッケージリストの更新
 apt update
+
+# --- 共通依存パッケージのインストール ---
+echo ""
+echo "[INF] Checking and installing common dependencies..."
+for pkg in ca-certificates curl wget gpg apt-transport-https; do
+    if ! check_installed "$pkg"; then
+        apt install -y "$pkg"
+    fi
+done
+
+# --- Docker Engine のインストール ---
+echo ""
+echo "[INF] Adding Docker's official GPG key..."
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+chmod a+r /etc/apt/keyrings/docker.asc
+
+# 'apt'コマンドのソースにDockerリポジトリを追加
+echo ""
+echo "[INF] Adding Docker repository to APT sources..."
+tee /etc/apt/sources.list.d/docker.sources << EOF
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+Components: stable
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+
+# パッケージリストの再更新
+echo ""
+echo "[INF] Updating package list..."
+apt update
+
+# Docker Engine、CLI、Containerdのインストール
+echo ""
+echo "[INF] Installing Docker Engine, CLI, and Containerd..."
+apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+# カレントユーザーをdockerグループに追加
+echo ""
+echo "[INF] Adding current user to 'docker' group..."
+groupadd docker 2>/dev/null
+usermod -aG docker "$CURRENT_USER"
+
+# グループ追加を確認
+echo "[INF] Verifying docker group membership..."
+if id -nG "$CURRENT_USER" | grep -qw docker; then
+    echo "[INF] User '$CURRENT_USER' successfully added to docker group."
+else
+    echo "[WRN] User '$CURRENT_USER' could not be added to docker group."
+fi
 
 # --- git のインストール ---
 echo ""
@@ -74,21 +129,7 @@ fi
 
 # --- VS Code のインストール ---
 echo ""
-echo "[INF] Checking and installing required packages for VS Code repository..."
-if ! check_installed "wget"; then
-    apt install -y wget
-fi
-if ! check_installed "gpg"; then
-    apt install -y gpg
-fi
-if ! check_installed "apt-transport-https"; then
-    apt install -y apt-transport-https
-fi
-
-# Microsoftの公式GPGキーを追加
-echo ""
 echo "[INF] Adding Microsoft's official GPG key..."
-install -m 0755 -d /etc/apt/keyrings
 wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > /etc/apt/keyrings/packages.microsoft.gpg
 chmod a+r /etc/apt/keyrings/packages.microsoft.gpg
 
@@ -125,8 +166,6 @@ apt autoremove -y
 echo ""
 echo "[INF] Installing VS Code Remote Development Extension Pack..."
 EXTENSION_ID="ms-vscode-remote.vscode-remote-extensionpack"
-CURRENT_USER=${SUDO_USER:-$(whoami)}        # SUDO_USERが設定されていない場合はwhoamiで取得
-echo "[INF] Current user: $CURRENT_USER"
 if ! check_extension_installed "$EXTENSION_ID" "$CURRENT_USER"; then
     sudo -H -u "$CURRENT_USER" code --install-extension "$EXTENSION_ID" --force
 fi
@@ -164,10 +203,10 @@ cat "$WSL_CONF"
 
 # 完了メッセージ
 echo ""
-echo "[INF] Other tools setup script completed successfully."
+echo "[INF] Remote development setup script completed successfully."
 echo ""
 echo "[INF] #################### ATTENTION #####################"
-echo "[INF] You must restart WSL2 to apply the wsl.conf changes."
+echo "[INF] You must restart WSL2 to apply the docker group and wsl.conf changes."
 echo "[INF] Exit WSL2 terminal and run 'wsl --shutdown' from PowerShell."
 echo "[INF] ###################################################"
 echo ""
