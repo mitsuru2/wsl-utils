@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 # ==============================================================================
 # Remote Development Setup Script for WSL2 (Ubuntu/Debian)
@@ -8,19 +9,44 @@
 # 主な処理内容は以下の通りです：
 #   1. Docker Engineのインストールと、現在のユーザーのdockerグループへの追加
 #   2. git のインストール
-#   3. VS Code (Linux版) のインストール
-#   4. VS Code Remote Development 拡張パックのインストール
-#   5. /etc/wsl.conf に appendWindowsPath = false を設定
 #
 # 使用方法: sudo ./setup-remote-development.sh
 # ==============================================================================
 
+# プロキシ設定
+# 必要な場合は以下のコメントアウトを解除してプロキシアドレスを設定してください。
+# export http_proxy="http://127.0.0.1:3128"
+# export https_proxy="http://127.0.0.1:3128"
+
 # ヘルプ表示
 usage() {
     echo "Usage: $0"
-    echo "This script sets up a remote development environment (Docker, git, VS Code) on a Debian-based system."
+    echo "This script sets up a remote development environment (Docker, git) on a Debian-based system."
     echo "Please run it with superuser privileges."
+    echo
+    echo "NOTE: VS Code is not installed on Linux env. You must install it on Windows env with Remote."
     exit 1
+}
+
+# プロキシ環境変数の確認
+check_proxy_env() {
+    if [[ -z "${http_proxy:-}" || -z "${https_proxy:-}" ]]; then
+        echo "[WRN] http_proxy または https_proxy が設定されていません。"
+        echo "[WRN] 必要な場合は、本スクリプトの20行目付近を確認してプロキシ設定を有効化してください。"
+        echo "[WRN]   http_proxy  : ${http_proxy:-(未設定)}"
+        echo "[WRN]   https_proxy : ${https_proxy:-(未設定)}"
+        echo ""
+        read -r -p "プロキシ未設定のまま処理を続行しますか？ [y/N]: " answer
+        case "$answer" in
+            [yY][eE][sS]|[yY])
+                echo "[INF] 続行します。"
+                ;;
+            *)
+                echo "[ERR] スクリプトを中止します。"
+                exit 1
+                ;;
+        esac
+    fi
 }
 
 # パッケージのインストール確認
@@ -35,21 +61,64 @@ check_installed() {
     fi
 }
 
-# VS Code拡張機能のインストール確認（実行ユーザー権限で確認）
-check_extension_installed() {
-    local extension_id=$1
-    local user=$2
-    if sudo -H -u "$user" code --list-extensions 2>/dev/null | grep -qiw "$extension_id"; then
-        echo "Extension '$extension_id' is already installed."
+# Windows側のVS Code (code コマンド) がWSLから利用可能か確認する
+check_code_command() {
+    local user=$1
+
+    if ! sudo -H -u "$user" bash -lc 'command -v code' >/dev/null 2>&1; then
+        echo "[WRN] 'code' コマンドが見つかりません。"
+        echo "[WRN] WSLのPATH共有設定(interop.appendWindowsPath)が有効か確認してください。"
+        echo "[WRN] また、Windows側でVS Codeがインストールされているか確認してください。"
+        return 1
+    fi
+
+    local code_path
+    code_path=$(sudo -H -u "$user" bash -lc 'command -v code')
+    echo "[INF] 'code' コマンドが見つかりました: $code_path"
+
+    if [[ "$code_path" != *"/mnt/"* ]]; then
+        echo "[WRN] 'code' コマンドがWindows側の実体を指していない可能性があります(パス: $code_path)。"
+        echo "[WRN] WSL内にLinux版VS Codeが別途インストールされていないか確認してください。"
+    fi
+
+    if sudo -H -u "$user" bash -lc 'timeout 10 code --version' >/dev/null 2>&1; then
+        echo "[INF] 'code --version' が正常に応答しました。"
         return 0
     else
-        echo "Extension '$extension_id' is not installed."
+        echo "[WRN] 'code --version' がタイムアウトまたはエラーになりました。"
+        echo "[WRN] PATH共有は有効でも、Windows側のVS Code起動自体に問題がある可能性があります。"
         return 1
     fi
 }
 
+# Windows側のVS CodeにRemote Development拡張パックをインストールする
+install_vscode_extension() {
+    local extension_id=$1
+    local user=$2
+
+    echo "[INF] Checking installed extensions on Windows VS Code..."
+    if sudo -H -u "$user" bash -lc "timeout 30 code --list-extensions 2>/dev/null" | grep -qiw "$extension_id"; then
+        echo "[INF] Extension '$extension_id' is already installed."
+        return 0
+    fi
+
+    echo "[INF] Installing extension '$extension_id'..."
+    if sudo -H -u "$user" bash -lc "timeout 60 code --install-extension '$extension_id' --force"; then
+        echo "[INF] Extension '$extension_id' installed successfully."
+        return 0
+    else
+        echo "[WRN] Extension '$extension_id' の インストールに失敗しました。"
+        return 1
+    fi
+}
+
+################################################################################
+# メイン処理: ここから
+################################################################################
+
+
 # -h または --help が指定された場合にヘルプを表示
-if [[ "$1" == "--help" || "$1" == "-h" ]]; then
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     usage
 fi
 
@@ -62,6 +131,9 @@ fi
 
 # 開始メッセージ
 echo "[INF] Starting remote development setup script..."
+
+# プロキシ設定確認
+check_proxy_env
 
 CURRENT_USER=${SUDO_USER:-$(whoami)}        # SUDO_USERが設定されていない場合はwhoamiで取得
 echo "[INF] Current user: $CURRENT_USER"
@@ -109,7 +181,7 @@ apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker
 # カレントユーザーをdockerグループに追加
 echo ""
 echo "[INF] Adding current user to 'docker' group..."
-groupadd docker 2>/dev/null
+groupadd docker 2>/dev/null || true
 usermod -aG docker "$CURRENT_USER"
 
 # グループ追加を確認
@@ -127,86 +199,12 @@ if ! check_installed "git"; then
     apt install -y git
 fi
 
-# --- VS Code のインストール ---
-echo ""
-echo "[INF] Adding Microsoft's official GPG key..."
-wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > /etc/apt/keyrings/packages.microsoft.gpg
-chmod a+r /etc/apt/keyrings/packages.microsoft.gpg
-
-# 'apt'コマンドのソースにVS Codeリポジトリを追加
-echo ""
-echo "[INF] Adding VS Code repository to APT sources..."
-tee /etc/apt/sources.list.d/vscode.sources << EOF
-Types: deb
-URIs: https://packages.microsoft.com/repos/code
-Suites: stable
-Components: main
-Architectures: amd64,arm64,armhf
-Signed-By: /etc/apt/keyrings/packages.microsoft.gpg
-EOF
-
-# パッケージリストの再更新
-echo ""
-echo "[INF] Updating package list..."
-apt update
-
-# VS Codeのインストール
-echo ""
-echo "[INF] Installing VS Code..."
-if ! check_installed "code"; then
-    apt install -y code
-fi
-
-# 不要なパッケージの削除
-echo ""
-echo "[INF] Cleaning up unnecessary packages..."
-apt autoremove -y
-
-# --- VS Code Remote Development 拡張パックのインストール ---
-echo ""
-echo "[INF] Installing VS Code Remote Development Extension Pack..."
-EXTENSION_ID="ms-vscode-remote.vscode-remote-extensionpack"
-if ! check_extension_installed "$EXTENSION_ID" "$CURRENT_USER"; then
-    sudo -H -u "$CURRENT_USER" code --install-extension "$EXTENSION_ID" --force
-fi
-
-# --- /etc/wsl.conf の設定変更 ---
-echo ""
-echo "[INF] Configuring /etc/wsl.conf (appendWindowsPath = false)..."
-
-WSL_CONF="/etc/wsl.conf"
-
-# ファイルが存在しない場合は作成
-if [[ ! -f "$WSL_CONF" ]]; then
-    touch "$WSL_CONF"
-fi
-
-if grep -q "^\[interop\]" "$WSL_CONF"; then
-    if grep -q "^\s*appendWindowsPath\s*=" "$WSL_CONF"; then
-        # appendWindowsPathキーが既に存在する場合は値を上書き
-        sed -i "s/^\s*appendWindowsPath\s*=.*/appendWindowsPath = false/" "$WSL_CONF"
-    else
-        # [interop]セクションが存在する場合はその直後にキーを追加
-        sed -i "/^\[interop\]/a appendWindowsPath = false" "$WSL_CONF"
-    fi
-else
-    # [interop]セクションが存在しない場合は新規追加
-    {
-        echo ""
-        echo "[interop]"
-        echo "appendWindowsPath = false"
-    } >> "$WSL_CONF"
-fi
-
-echo "[INF] Current /etc/wsl.conf contents:"
-cat "$WSL_CONF"
-
 # 完了メッセージ
 echo ""
 echo "[INF] Remote development setup script completed successfully."
 echo ""
 echo "[INF] #################### ATTENTION #####################"
-echo "[INF] You must restart WSL2 to apply the docker group and wsl.conf changes."
+echo "[INF] You must restart WSL2 to apply the docker group changes."
 echo "[INF] Exit WSL2 terminal and run 'wsl --shutdown' from PowerShell."
 echo "[INF] ###################################################"
 echo ""
