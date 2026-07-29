@@ -9,9 +9,6 @@ WSL2上のUbuntu/Debian系システムにリモート開発環境を構築する
 
 - Docker Engine のインストールと、現在のユーザーの `docker` グループへの追加（`sudo` なしでDockerコマンドを実行できるようにする）
 - `git` のインストール
-- VS Code (Linux版) のインストール
-- VS Codeに Remote Development 拡張パック (`ms-vscode-remote.vscode-remote-extensionpack`) を導入
-- `/etc/wsl.conf` に `appendWindowsPath = false` を設定
 
 #### 使い方
 
