@@ -61,56 +61,43 @@ check_installed() {
     fi
 }
 
-# Windows側のVS Code (code コマンド) がWSLから利用可能か確認する
-check_code_command() {
-    local user=$1
-
-    if ! sudo -H -u "$user" bash -lc 'command -v code' >/dev/null 2>&1; then
-        echo "[WRN] 'code' コマンドが見つかりません。"
-        echo "[WRN] WSLのPATH共有設定(interop.appendWindowsPath)が有効か確認してください。"
-        echo "[WRN] また、Windows側でVS Codeがインストールされているか確認してください。"
-        return 1
-    fi
-
-    local code_path
-    code_path=$(sudo -H -u "$user" bash -lc 'command -v code')
-    echo "[INF] 'code' コマンドが見つかりました: $code_path"
-
-    if [[ "$code_path" != *"/mnt/"* ]]; then
-        echo "[WRN] 'code' コマンドがWindows側の実体を指していない可能性があります(パス: $code_path)。"
-        echo "[WRN] WSL内にLinux版VS Codeが別途インストールされていないか確認してください。"
-    fi
-
-    if sudo -H -u "$user" bash -lc 'timeout 10 code --version' >/dev/null 2>&1; then
-        echo "[INF] 'code --version' が正常に応答しました。"
+# Dockerデーモン用のプロキシ設定を行う
+# http_proxy / https_proxy が設定されている場合のみ、systemd drop-inファイルを作成する
+setup_docker_proxy() {
+    if [[ -z "${http_proxy:-}" && -z "${https_proxy:-}" ]]; then
+        echo "[INF] プロキシが設定されていないため、Dockerデーモンへのプロキシ設定はスキップします。"
         return 0
+    fi
+ 
+    echo "[INF] Dockerデーモン用のプロキシ設定を行います..."
+ 
+    local proxy_dir="/etc/systemd/system/docker.service.d"
+    local proxy_conf="${proxy_dir}/http-proxy.conf"
+ 
+    install -d -m 0755 "$proxy_dir"
+ 
+    {
+        echo "[Service]"
+        [[ -n "${http_proxy:-}" ]]  && echo "Environment=\"HTTP_PROXY=${http_proxy}\""
+        [[ -n "${https_proxy:-}" ]] && echo "Environment=\"HTTPS_PROXY=${https_proxy}\""
+        [[ -n "${no_proxy:-}" ]]    && echo "Environment=\"NO_PROXY=${no_proxy}\""
+    } > "$proxy_conf"
+ 
+    chmod 0644 "$proxy_conf"
+ 
+    echo "[INF] ${proxy_conf} を作成しました。"
+    echo "[INF] systemdの設定を再読み込みし、Dockerを再起動します..."
+ 
+    systemctl daemon-reload
+    systemctl restart docker
+ 
+    if systemctl is-active --quiet docker; then
+        echo "[INF] Dockerデーモンへのプロキシ設定が完了しました。"
     else
-        echo "[WRN] 'code --version' がタイムアウトまたはエラーになりました。"
-        echo "[WRN] PATH共有は有効でも、Windows側のVS Code起動自体に問題がある可能性があります。"
-        return 1
+        echo "[WRN] Dockerの再起動に失敗した可能性があります。'systemctl status docker' で確認してください。"
     fi
 }
 
-# Windows側のVS CodeにRemote Development拡張パックをインストールする
-install_vscode_extension() {
-    local extension_id=$1
-    local user=$2
-
-    echo "[INF] Checking installed extensions on Windows VS Code..."
-    if sudo -H -u "$user" bash -lc "timeout 30 code --list-extensions 2>/dev/null" | grep -qiw "$extension_id"; then
-        echo "[INF] Extension '$extension_id' is already installed."
-        return 0
-    fi
-
-    echo "[INF] Installing extension '$extension_id'..."
-    if sudo -H -u "$user" bash -lc "timeout 60 code --install-extension '$extension_id' --force"; then
-        echo "[INF] Extension '$extension_id' installed successfully."
-        return 0
-    else
-        echo "[WRN] Extension '$extension_id' の インストールに失敗しました。"
-        return 1
-    fi
-}
 
 ################################################################################
 # メイン処理: ここから
@@ -192,6 +179,10 @@ else
     echo "[WRN] User '$CURRENT_USER' could not be added to docker group."
 fi
 
+# --- Dockerデーモン用プロキシ設定 ---
+echo ""
+setup_docker_proxy
+
 # --- git のインストール ---
 echo ""
 echo "[INF] Checking and installing git..."
@@ -205,6 +196,10 @@ echo "[INF] Remote development setup script completed successfully."
 echo ""
 echo "[INF] #################### ATTENTION #####################"
 echo "[INF] You must restart WSL2 to apply the docker group changes."
-echo "[INF] Exit WSL2 terminal and run 'wsl --shutdown' from PowerShell."
+echo "[INF] Exit WSL2 terminal and run following command from PowerShell."
+echo "[INF]   > wsl --shutdown"
+echo "[INF]"
+echo "[INF] You can run following command to test docker:"
+echo "[INF]   $ docker run hello-world"
 echo "[INF] ###################################################"
 echo ""
